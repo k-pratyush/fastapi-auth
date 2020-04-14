@@ -1,27 +1,15 @@
 from dotenv import load_dotenv
 from fastapi import FastAPI, Request, Response
-import uvicorn
 import mongoengine as db
 import bcrypt
 import jwt
-from http.cookies import SimpleCookie
+from models import User, Post
 import json
 import os
 
 load_dotenv()
 
 app = FastAPI()
-
-class User(db.Document):
-    meta = {'allow_inheritance': True}
-    username = db.StringField(required=True)
-    email = db.EmailField(required=True, unique=True)
-    password = db.StringField(required=True)
-
-class Post(db.Document):
-    meta = {'allow_inheritance': True}
-    text = db.StringField()
-    author = db.EmailField(required=True)
 
 @app.on_event('startup')
 def startup():
