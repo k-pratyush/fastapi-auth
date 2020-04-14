@@ -1,5 +1,5 @@
 from dotenv import load_dotenv
-from fastapi import FastAPI, Request, Response
+from fastapi import FastAPI, Request, Response, HTTPException
 import mongoengine as db
 import bcrypt
 import jwt
@@ -11,22 +11,27 @@ load_dotenv()
 
 app = FastAPI()
 
+
 @app.on_event('startup')
 def startup():
-    db.connect('test1')
+    datab = db.connect('test1')
+
 
 @app.on_event('shutdown')
 def shutdown():
+    db.connect('test1').drop_database('test1')
     db.disconnect()
+
 
 @app.get('/')
 async def home():
     return {
         "success": True,
         "secret": os.environ.get('secret'),
-        }
+    }
 
-@app.post('/signup')
+
+@app.post('/signup', status_code=201)
 async def signup(request: Request, response: Response):
     try:
         data = json.loads(await request.body())
@@ -46,15 +51,12 @@ async def signup(request: Request, response: Response):
                 "token": token
             }
         except db.errors.NotUniqueError:
-            return {
-                "success": False,
-                "message": "Email already exists"
-            }
+            raise HTTPException(
+                status_code=412, detail="Email already exists")
     except KeyError:
-        return {
-            "success": False,
-            "message": "Incomplete form"
-            }
+        raise HTTPException(
+            status_code=400, detail="Incomplete request form")
+
 
 @app.post('/login')
 async def login(request: Request, response: Response):
@@ -65,39 +67,37 @@ async def login(request: Request, response: Response):
         email = data['email']
         user = User.objects(email=email)
         if user:
-            if bcrypt.checkpw(password.encode('utf-8'),
-                                user[0].password.encode('utf-8')):
-                token = jwt.encode({"email": email},
-                                   os.environ.get('secret'), algorithm='HS256').decode("utf-8")
-                response.set_cookie(
-                    key="token", value=f"Bearer {token}", httponly=True)
-                return {
-                    "success": True,
-                    "token": token
-                }
-            else:
-                return {
-                    "success": False,
-                    "message": "Incorrect password"
-                }
+            try:
+                if bcrypt.checkpw(password.encode('utf-8'),
+                                  user[0].password.encode('utf-8')):
+                    token = jwt.encode({"email": email}, os.environ.get(
+                        'secret'), algorithm='HS256').decode("utf-8")
+                    response.set_cookie(
+                        key="token", value=f"Bearer {token}", httponly=True)
+                    return {
+                        "success": True,
+                        "token": token
+                    }
+            except ValueError:
+                raise HTTPException(
+                    status_code=403, detail="Incorrect password")
         else:
-            return {
-                "success": False,
-                "message": "No user found"
-            }
+            raise HTTPException(status_code=403, detail="User not found")
     except KeyError:
-        print('Incomplete form')
+        raise HTTPException(status_code=400, detail='Incomplete form')
 
 
-@app.post('/protected-route')
-async def get_protected_route(request: Request):
+@app.post('/protected-route', status_code=201)
+async def protected_route(request: Request):
     try:
         text = json.loads(await request.body())
-        print(text)
         token = request.cookies.get('token')
         token = token.split(" ")[1]
-        data = jwt.decode(token, os.environ.get('secret'), algorithms=['HS256'])
-        user = User.objects(email = data['email'])
+        data = jwt.decode(
+            token,
+            os.environ.get('secret'),
+            algorithms=['HS256'])
+        user = User.objects(email=data['email'])
         if user:
             try:
                 newPost = Post(text=text['text'], author=user[0].email)
@@ -107,23 +107,18 @@ async def get_protected_route(request: Request):
                     "message": "You are authenticated",
                     "text": text['text']
                 }
-            except:
+            except BaseException:
                 return {
                     "success": False,
                     "message": "there was an error posting"
                 }
         else:
-            return {
-                "success": False,
-                "message": "You are not authenticated"
-            }
+            raise HTTPException(
+                status_code=403,
+                detail="You are not authenticated")
     except KeyError:
-        return {
-            "success": False,
-            "message": "Incomplete form"
-        }
+        raise HTTPException(status_code=400, detail="Incomplete form")
     except AttributeError:
-        return {
-            "success": False,
-            "message": "You are not authenticated"
-        }
+        raise HTTPException(
+            status_code=400,
+            detail="You are not authenticated")
